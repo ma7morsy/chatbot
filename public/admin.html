@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin · Document Chatbot</title><link rel="stylesheet" href="/app.css">
+<style>
+.auth{min-height:100%;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px;width:380px;max-width:100%}
+.card h1{font-size:18px;margin:0 0 4px}
+header{display:flex;align-items:center;gap:12px;padding:12px 18px;background:var(--panel);border-bottom:1px solid var(--line)}
+header b{flex:1}
+.app{display:flex;height:calc(100% - 55px)}
+aside{width:250px;background:var(--panel);border-right:1px solid var(--line);padding:12px;overflow:auto}
+aside button.bot{display:block;width:100%;text-align:left;background:none;border:0;padding:9px 10px;border-radius:8px;cursor:pointer}
+aside button.bot.on{background:var(--bot);font-weight:600}
+aside button.bot small{display:block;color:var(--mute);font-weight:400}
+main{flex:1;overflow:auto;padding:20px;max-width:760px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:16px}
+.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;cursor:pointer;color:var(--mute)}
+.tabs button.on{color:var(--ink);border-color:var(--acc);font-weight:600}
+.item{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.item span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item.click{cursor:pointer}
+.drop{border:2px dashed var(--line);border-radius:10px;padding:18px;text-align:center;color:var(--mute);cursor:pointer;margin-bottom:12px}
+.drop.over{border-color:var(--acc);color:var(--acc)}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:12px;white-space:pre-wrap;word-break:break-all}
+.m{padding:8px 12px;border-radius:10px;margin:6px 0;max-width:85%;white-space:pre-wrap}
+.m.user{background:var(--me);color:var(--meink);margin-left:auto}.m.assistant{background:var(--bot)}
+.m small{display:block;opacity:.7;font-size:11px}
+@media(max-width:760px){.app{flex-direction:column}aside{width:100%;max-height:30%;border-right:0;border-bottom:1px solid var(--line)}}
+</style>
+</head>
+<body><div id="root"></div>
+<script>
+const $=s=>document.querySelector(s),root=$('#root');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(p,o={}){
+  const fd=o.body instanceof FormData;
+  const r=await fetch('/api'+p,{...o,headers:o.body&&!fd?{'Content-Type':'application/json'}:{}});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){const e=new Error(j.error||'Request failed');e.status=r.status;throw e}return j;
+}
+let me,bots=[],cur=null,tab='settings';
+
+async function init(){try{me=await api('/auth/me');await load();render()}catch{authView()}}
+async function authView(){
+  const {registration}=await api('/auth/status');let mode='login';
+  const draw=()=>{root.innerHTML=`<div class="auth"><form class="card" id="af">
+    <h1>${mode==='login'?'Sign in':'Create admin account'}</h1><p class="note">Document Chatbot admin</p>
+    <label>Email<input name="email" type="email" required autocomplete="username"></label>
+    <label>Password<input name="password" type="password" required minlength="8" autocomplete="${mode==='login'?'current-password':'new-password'}"></label>
+    <p class="err" id="ae"></p><button class="btn" style="width:100%">${mode==='login'?'Sign in':'Create account'}</button>
+    ${registration?`<p class="note" style="text-align:center"><a href="#" id="sw">${mode==='login'?'Create an account':'I already have an account'}</a></p>`:''}</form></div>`;
+    $('#sw')&&($('#sw').onclick=e=>{e.preventDefault();mode=mode==='login'?'reg':'login';draw()});
+    $('#af').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);
+      try{await api('/auth/'+(mode==='login'?'login':'register'),{method:'POST',body:JSON.stringify(Object.fromEntries(f))});init()}
+      catch(x){$('#ae').textContent=x.message}};
+  };
+  draw();
+}
+async function load(){bots=await api('/bots');if(!cur||!bots.find(b=>b.id===cur))cur=bots[0]?.id||null}
+const bot=()=>bots.find(b=>b.id===cur);
+
+function render(){
+  root.innerHTML=`<header><b>Document Chatbot</b><span class="note">${esc(me.email)}</span><button class="btn ghost" id="lo">Sign out</button></header>
+  <div class="app"><aside><button class="btn" style="width:100%;margin-bottom:8px" id="nb">+ New agent</button>
+  ${bots.map(b=>`<button class="bot ${b.id===cur?'on':''}" data-id="${b.id}">${esc(b.name)}<small>${b.active?'Live':'Paused'}</small></button>`).join('')}</aside>
+  <main id="main"></main></div>`;
+  $('#lo').onclick=async()=>{await api('/auth/logout',{method:'POST'});authView()};
+  $('#nb').onclick=async()=>{const b=await api('/bots',{method:'POST',body:JSON.stringify({name:'New agent'})});bots.unshift(b);cur=b.id;tab='settings';render()};
+  document.querySelectorAll('aside .bot').forEach(el=>el.onclick=()=>{cur=+el.dataset.id;tab='settings';render()});
+  main();
+}
+function main(){
+  const b=bot(),m=$('#main');
+  if(!b){m.innerHTML='<p class="note">Create your first agent to get started.</p>';return}
+  m.innerHTML=`<div class="tabs">${[['settings','Settings'],['docs','Documents'],['convos','Conversations'],['share','Share']].map(([k,l])=>`<button data-t="${k}" class="${tab===k?'on':''}">${l}</button>`).join('')}</div><div id="pane"></div>`;
+  m.querySelectorAll('.tabs button').forEach(el=>el.onclick=()=>{tab=el.dataset.t;main()});
+  ({settings,docs,convos,share})[tab](b,$('#pane'));
+}
+
+function settings(b,p){
+  const prov={openai:'OpenAI-compatible (OpenAI, Groq, OpenRouter, DeepSeek, Ollama…)',anthropic:'Anthropic (Claude)',gemini:'Google Gemini'};
+  p.innerHTML=`<form id="sf"><label>Agent name<input name="name" value="${esc(b.name)}" required></label>
+  <label>Welcome message<input name="welcome" value="${esc(b.welcome)}"></label>
+  <label>Extra instructions (tone, company name, escalation contact)<textarea name="instructions">${esc(b.instructions)}</textarea></label>
+  <label>Model provider<select name="provider">${Object.keys(prov).map(k=>`<option value="${k}" ${b.provider===k?'selected':''}>${prov[k]}</option>`).join('')}</select></label>
+  <label>Base URL (OpenAI-compatible only)<input name="base_url" value="${esc(b.base_url)}"></label>
+  <label>Model<input name="model" value="${esc(b.model)}" required></label>
+  <label>API key<input name="api_key" type="password" autocomplete="new-password" placeholder="${b.has_key?'Saved. Leave blank to keep it':'Paste your key'}"></label>
+  <p class="note">Stored encrypted on the server. It is never sent to the browser or to customers.</p>
+  <label class="row"><input type="checkbox" name="active" ${b.active?'checked':''}> Agent is live</label>
+  <div class="row" style="margin-top:14px"><button class="btn">Save</button><button type="button" class="btn danger" id="del">Delete agent</button><span id="sm" class="note"></span></div></form>`;
+  $('#sf').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target),o=Object.fromEntries(f);o.active=f.has('active');
+    try{const u=await api('/bots/'+b.id,{method:'PUT',body:JSON.stringify(o)});Object.assign(b,u);$('#sm').textContent='Saved';$('#sm').className='note';
+      $('#sf [name=api_key]').value='';document.querySelector('aside .bot.on').firstChild.textContent=u.name}
+    catch(x){$('#sm').textContent=x.message;$('#sm').className='err'}};
+  $('#del').onclick=async()=>{if(!confirm('Delete this agent, its documents and conversations?'))return;
+    await api('/bots/'+b.id,{method:'DELETE'});cur=null;await load();render()};
+}
+
+async function docs(b,p){
+  p.innerHTML=`<div class="drop" id="dz" tabindex="0" role="button">Drop files or click to upload<br><small>PDF, DOCX, TXT, MD, CSV, JSON, HTML · up to 15 MB each</small></div>
+  <input type="file" id="fi" multiple hidden accept=".pdf,.docx,.txt,.md,.csv,.json,.html,.htm"><div id="up" class="note"></div><div id="dl"></div>`;
+  const list=async()=>{const d=await api(`/bots/${b.id}/documents`);
+    $('#dl').innerHTML=d.length?d.map(x=>`<div class="item"><span>${esc(x.name)}</span><small class="note">${Math.round(x.chars/1000)}k chars</small><button class="btn danger" data-d="${x.id}">Remove</button></div>`).join(''):'<p class="note">No documents yet. Your agent can only answer from what you upload here.</p>';
+    $('#dl').querySelectorAll('[data-d]').forEach(el=>el.onclick=async()=>{await api('/documents/'+el.dataset.d,{method:'DELETE'});list()})};
+  const send=async files=>{if(!files.length)return;const fd=new FormData();[...files].forEach(f=>fd.append('files',f));$('#up').textContent='Uploading…';
+    try{const r=await api(`/bots/${b.id}/documents`,{method:'POST',body:fd});
+      $('#up').innerHTML=r.map(x=>x.error?`<div class="err">${esc(x.name)}: ${esc(x.error)}</div>`:`<div>${esc(x.name)} added</div>`).join('')}
+    catch(x){$('#up').innerHTML=`<span class="err">${esc(x.message)}</span>`}list()};
+  const dz=$('#dz');dz.onclick=()=>$('#fi').click();dz.onkeydown=e=>{if(e.key==='Enter'||e.key===' ')$('#fi').click()};
+  $('#fi').onchange=e=>{send(e.target.files);e.target.value=''};
+  dz.ondragover=e=>{e.preventDefault();dz.classList.add('over')};dz.ondragleave=()=>dz.classList.remove('over');
+  dz.ondrop=e=>{e.preventDefault();dz.classList.remove('over');send(e.dataTransfer.files)};
+  list();
+}
+
+async function convos(b,p){
+  const c=await api(`/bots/${b.id}/conversations`);
+  p.innerHTML=c.length?c.map(x=>`<div class="item click" data-c="${x.id}"><span dir="auto">${esc(x.first||'(empty)')}</span><small class="note">${x.n} msgs · ${esc(x.created_at)}</small></div>`).join('')+'<div id="cv"></div>':'<p class="note">No conversations yet. Share your customer link to get started.</p>';
+  p.querySelectorAll('[data-c]').forEach(el=>el.onclick=async()=>{
+    const m=await api('/conversations/'+el.dataset.c+'/messages');
+    $('#cv').innerHTML='<hr>'+m.map(x=>`<div class="m ${x.role}" dir="auto">${esc(x.content)}${x.sources?`<small>Sources: ${esc(x.sources)}</small>`:''}</div>`).join('');
+    $('#cv').scrollIntoView({behavior:'smooth'})});
+}
+
+function share(b,p){
+  const url=`${location.origin}/c/${b.slug}`;
+  const embed=`<iframe src="${url}" style="width:100%;max-width:420px;height:600px;border:0;border-radius:12px" title="${esc(b.name)}"></iframe>`;
+  p.innerHTML=`<label>Customer link</label><div class="row"><input readonly value="${esc(url)}" id="u"><a class="btn" href="${esc(url)}" target="_blank" rel="noopener">Open</a></div>
+  <label>Embed on your website</label><pre id="em">${esc(embed)}</pre><button class="btn ghost" id="cp">Copy embed code</button>
+  ${b.active?'':'<p class="err">This agent is paused, so customers cannot open the link.</p>'}`;
+  $('#cp').onclick=()=>{navigator.clipboard.writeText(embed);$('#cp').textContent='Copied'};
+}
+init();
+</script></body></html>

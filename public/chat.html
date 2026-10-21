@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chat</title><link rel="stylesheet" href="/app.css">
+<style>
+body{display:flex;flex-direction:column}
+header{padding:12px 18px;background:var(--panel);border-bottom:1px solid var(--line);font-weight:700}
+#log{flex:1;overflow:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:min(680px,88%);padding:10px 14px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word}
+.msg.user{align-self:flex-end;background:var(--me);color:var(--meink);border-bottom-right-radius:4px}
+.msg.bot{align-self:flex-start;background:var(--bot);border-bottom-left-radius:4px}
+.msg.e{align-self:center;color:var(--err);border:1px solid var(--err)}
+.dots span{display:inline-block;width:6px;height:6px;margin:0 2px;border-radius:50%;background:var(--mute);animation:b 1s infinite}
+.dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
+@keyframes b{50%{transform:translateY(-4px)}}
+@media (prefers-reduced-motion:reduce){.dots span{animation:none}}
+form{display:flex;gap:8px;padding:12px 16px;background:var(--panel);border-top:1px solid var(--line)}
+form textarea{flex:1;min-height:0;resize:none;max-height:140px;border-radius:10px}
+</style>
+</head>
+<body>
+<header id="title">Assistant</header>
+<div id="log" aria-live="polite"></div>
+<form id="f"><textarea id="q" rows="1" placeholder="Type your question…" dir="auto" maxlength="2000"></textarea><button class="btn" id="send">Send</button></form>
+<script>
+const $=id=>document.getElementById(id), slug=location.pathname.split('/').pop();
+let sid=localStorage.getItem('sid_'+slug);
+if(!sid){sid=[...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,'0')).join('');localStorage.setItem('sid_'+slug,sid)}
+function add(cls,text){const d=document.createElement('div');d.className='msg '+cls;d.dir='auto';d.textContent=text;$('log').appendChild(d);$('log').scrollTop=1e9;return d}
+(async()=>{
+  const r=await fetch('/api/public/'+slug);const j=await r.json();
+  if(!r.ok){$('title').textContent='Unavailable';add('e',j.error);$('send').disabled=$('q').disabled=true;return}
+  $('title').textContent=j.name;document.title=j.name;if(j.welcome)add('bot',j.welcome);
+})();
+$('f').onsubmit=async e=>{
+  e.preventDefault();const q=$('q').value.trim();if(!q)return;
+  $('q').value='';$('q').style.height='';add('user',q);$('send').disabled=true;
+  const t=add('bot','');t.innerHTML='<span class="dots"><span></span><span></span><span></span></span>';
+  try{
+    const r=await fetch('/api/public/'+slug+'/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session:sid,message:q})});
+    const j=await r.json();t.remove();
+    add(r.ok?'bot':'e',r.ok?j.reply:j.error);
+  }catch{t.remove();add('e','Connection problem. Please try again.')}
+  $('send').disabled=false;$('q').focus();
+};
+$('q').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();$('f').requestSubmit()}};
+$('q').oninput=function(){this.style.height='auto';this.style.height=this.scrollHeight+'px'};
+</script>
+</body></html>
